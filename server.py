@@ -46,7 +46,7 @@ TEXT_DATA_FILE = config.TEXT_DATA_FILE
 @app.on_event("startup")
 async def startup_event():
     global model, dataset_embeddings, dataset
-    print(f"서버 시작! 장치: {device.upper()}")
+    print(f"🚀 서버 시작! 장치: {device.upper()}")
 
     # 모델 로드
     model = SentenceTransformer('jhgan/ko-sbert-nli', device=device)
@@ -63,14 +63,14 @@ async def startup_event():
         dataset = extract_speaker_text_from_json_in_folder(test_path)
 
         if not dataset:
-            print("오류: 데이터셋을 찾을 수 없습니다.")
+            print("❌ 오류: 데이터셋을 찾을 수 없습니다.")
 
         dataset_embeddings = model.encode(dataset, convert_to_tensor=True)
         torch.save(dataset_embeddings, EMBEDDING_FILE)
         with open(TEXT_DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(dataset, f, ensure_ascii=False, indent=2)
 
-    print("준비 완료!")
+    print("✅ 준비 완료!")
 
 
 class ChatRequest(BaseModel):
@@ -97,7 +97,8 @@ async def chat(request: ChatRequest):
     else:
         reference_answer = matched_text
 
-    print(f"{LOCAL_MODEL_NAME}에게 생성 요청 중...")
+    # 2. [생성] Ollama에게 답변 요약 요청 (Generation)
+    print(f"🤖 {LOCAL_MODEL_NAME}에게 생성 요청 중...")
 
     try:
         completion = client.chat.completions.create(
@@ -123,7 +124,7 @@ async def chat(request: ChatRequest):
         is_generated = True
 
     except Exception as e:
-        print(f"Ollama 연결 실패: {e}")
+        print(f"❌ Ollama 연결 실패: {e}")
         # 실패 시 원본 답변 반환
         final_answer = reference_answer
         is_generated = False
