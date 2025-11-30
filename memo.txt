@@ -1,0 +1,17 @@
+doker 생성
+docker build -t my-dog-bot .
+
+gpu 있을 때
+docker run -it --gpus all --name dog-bot -v ${PWD}:/app my-dog-bot
+
+없을 때
+docker run -it --name dog-bot -v ${PWD}:/app my-dog-bot
+
+서버 gpu
+docker run -d --gpus all -p 8000:8000 -v ${PWD}:/app --name dog-api my-dog-api
+
+서버 gpu X
+docker run -d -p 8000:8000 -v ${PWD}:/app --name dog-api my-dog-api
+
+종료 후
+docker rm -f dog-bot
