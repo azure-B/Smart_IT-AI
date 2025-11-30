@@ -15,3 +15,10 @@ docker run -d -p 8000:8000 -v ${PWD}:/app --name dog-api my-dog-api
 
 종료 후
 docker rm -f dog-bot
+
+
+ollama
+docker run -it --rm --gpus all `
+  -e OLLAMA_URL="http://host.docker.internal:11434/v1" `
+  --add-host host.docker.internal:host-gateway `
+  -v ${PWD}:/app dog-bot
