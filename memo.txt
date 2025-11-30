@@ -1,3 +1,6 @@
+ollama pull
+ollama pull exaone3.5
+
 doker 생성
 docker build -t my-dog-bot .
 
@@ -13,12 +16,34 @@ docker run -d --gpus all -p 8000:8000 -v ${PWD}:/app --name dog-api my-dog-api
 서버 gpu X
 docker run -d -p 8000:8000 -v ${PWD}:/app --name dog-api my-dog-api
 
-종료 후
+ollama
+gpu
+docker run -it --rm --gpus all `
+  -e OLLAMA_URL="[http://host.docker.internal:11434/v1](http://host.docker.internal:11434/v1)" `
+  --add-host host.docker.internal:host-gateway `
+  -v ${PWD}:/app --name dog-bot my-dog-bot
+
+cpu
+  docker run -it --rm `
+  -e OLLAMA_URL="[http://host.docker.internal:11434/v1](http://host.docker.internal:11434/v1)" `
+  --add-host host.docker.internal:host-gateway `
+  -v ${PWD}:/app --name dog-bot my-dog-bot
+
+
+server
+gpu
+docker run -d --gpus all -p 8000:8000 `
+  -e OLLAMA_URL="[http://host.docker.internal:11434/v1](http://host.docker.internal:11434/v1)" `
+  --add-host host.docker.internal:host-gateway `
+  -v ${PWD}:/app --name dog-api my-dog-api
+
+cpu
+docker run -d -p 8000:8000 `
+  -e OLLAMA_URL="[http://host.docker.internal:11434/v1](http://host.docker.internal:11434/v1)" `
+  --add-host host.docker.internal:host-gateway `
+  -v ${PWD}:/app --name dog-api my-dog-api
+
+
+  종료 후
 docker rm -f dog-bot
 
-
-ollama
-docker run -it --rm --gpus all `
-  -e OLLAMA_URL="http://host.docker.internal:11434/v1" `
-  --add-host host.docker.internal:host-gateway `
-  -v ${PWD}:/app dog-bot
