@@ -5,31 +5,28 @@ import torch
 import os
 import json
 from sentence_transformers import SentenceTransformer, util
-from openai import OpenAI  # [추가] Ollama 연결용
+from openai import OpenAI
 import sys
 import io
-sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
+
+# [필수] Docker 로그 출력을 위한 UTF-8 강제 설정 (한글 깨짐 방지)
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-# --- 기존 config 및 read_data 임포트 ---
+# --- config 및 read_data 임포트 ---
 from config import config
 from read_data import extract_speaker_text_from_json_in_folder
 
 # ==========================================
 # [설정] Local LLM (Ollama) 연결 설정
 # ==========================================
-# 1. 사용할 모델 이름 (터미널에서 'ollama pull exaone3.5' 미리 실행 필요)
 LOCAL_MODEL_NAME = "exaone3.5"
 
-# 2. Ollama 주소 설정
-# Docker에서 실행 시 -e OLLAMA_URL="..." 옵션으로 주입된 값을 사용
-# 값이 없으면 로컬 기본값(localhost) 사용
+# Docker 환경변수 OLLAMA_URL 사용 (없으면 로컬 기본값)
 default_url = "http://localhost:11434/v1"
 OLLAMA_URL = os.getenv("OLLAMA_URL", default_url)
 
 print(f"🔗 AI 연결 주소: {OLLAMA_URL}")
 
-# Ollama 클라이언트 초기화
 client = OpenAI(
     base_url=OLLAMA_URL,
     api_key="ollama"
@@ -37,7 +34,7 @@ client = OpenAI(
 
 app = FastAPI()
 
-# 전역 변수 설정
+# 전역 변수
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model = None
 dataset_embeddings = None
@@ -63,16 +60,34 @@ async def startup_event():
             dataset = json.load(f)
     else:
         print("--- 데이터 생성 중 ---")
-        test_path = os.path.join("dataset", "Training")
-        dataset = extract_speaker_text_from_json_in_folder(test_path)
+
+        # [핵심 수정] 데이터셋 경로 자동 탐색 (./Dataset 또는 ../Dataset)
+        folder_candidates = ["Dataset", "dataset"]
+        base_paths = [".", ".."]
+        found_path = None
+
+        for base in base_paths:
+            for folder in folder_candidates:
+                candidate = os.path.join(base, folder, "Training")
+                if os.path.exists(candidate):
+                    found_path = candidate
+                    break
+            if found_path: break
+
+        if not found_path:
+            found_path = os.path.join("./Dataset", "Training")
+            print(f"❌ 경고: 데이터셋 폴더를 찾지 못했습니다. 경로 확인 필요: {found_path}")
+
+        dataset = extract_speaker_text_from_json_in_folder(found_path)
 
         if not dataset:
-            print("❌ 오류: 데이터셋을 찾을 수 없습니다.")
-
-        dataset_embeddings = model.encode(dataset, convert_to_tensor=True)
-        torch.save(dataset_embeddings, EMBEDDING_FILE)
-        with open(TEXT_DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(dataset, f, ensure_ascii=False, indent=2)
+            print("❌ 오류: 로드된 데이터가 없습니다.")
+            dataset = []
+        else:
+            dataset_embeddings = model.encode(dataset, convert_to_tensor=True)
+            torch.save(dataset_embeddings, EMBEDDING_FILE)
+            with open(TEXT_DATA_FILE, 'w', encoding='utf-8') as f:
+                json.dump(dataset, f, ensure_ascii=False, indent=2)
 
     print("✅ 준비 완료!")
 
@@ -85,9 +100,14 @@ class ChatRequest(BaseModel):
 async def chat(request: ChatRequest):
     global model, dataset_embeddings, dataset
 
-    query = request.user_input
+    query = request.user_input.strip()
+    if not query:
+        return {"reply": "내용을 입력해주세요.", "score": 0.0, "is_generated": False}
 
-    # 1. [검색] SBERT로 가장 유사한 답변 찾기 (Retrieval)
+    if dataset_embeddings is None or len(dataset) == 0:
+        return {"reply": "서버 초기화 중입니다. 잠시 후 다시 시도해주세요.", "score": 0.0, "is_generated": False}
+
+    # 1. [검색] (Retrieval)
     query_embedding = model.encode(query, convert_to_tensor=True)
     hits = util.semantic_search(query_embedding, dataset_embeddings, top_k=1)
 
@@ -95,13 +115,12 @@ async def chat(request: ChatRequest):
     matched_text = dataset[top_hit['corpus_id']]
     score = top_hit['score']
 
-    # 답변 부분만 추출 (Context로 사용)
     if "답변:" in matched_text:
         reference_answer = matched_text.split("답변:", 1)[1].strip()
     else:
         reference_answer = matched_text
 
-    # 2. [생성] Ollama에게 답변 요약 요청 (Generation)
+    # 2. [생성] (Generation)
     print(f"🤖 {LOCAL_MODEL_NAME}에게 생성 요청 중...")
 
     try:
@@ -129,16 +148,16 @@ async def chat(request: ChatRequest):
 
     except Exception as e:
         print(f"❌ Ollama 연결 실패: {e}")
-        # 실패 시 원본 답변 반환
         final_answer = reference_answer
         is_generated = False
 
     return {
         "reply": final_answer,
         "score": float(score),
-        "is_generated": is_generated  # 생성 여부를 클라이언트가 알 수 있게 추가
+        "is_generated": is_generated
     }
 
-# 로컬 테스트용
-# if __name__ == "__main__":
-#     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# [수정] Node.js(8008)와 겹치지 않게 5000번 포트로 실행
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=5000)
