@@ -6,6 +6,10 @@ import os
 import json
 from sentence_transformers import SentenceTransformer, util
 from openai import OpenAI  # [추가] Ollama 연결용
+import sys
+import io
+sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 # --- 기존 config 및 read_data 임포트 ---
 from config import config

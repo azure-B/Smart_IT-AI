@@ -4,9 +4,43 @@ from read_data import extract_speaker_text_from_json_in_folder
 import torch
 import os
 import json
-from openai import OpenAI  # [추가] Ollama 연결용 라이브러리
+from openai import OpenAI
+import sys
+import io
 
-# 1. 사용할 모델 이름 (터미널에서 'ollama pull exaone3.5' 미리 실행 필요)
+# [필수] 출력(Print)은 UTF-8로 강제 고정 (이모지 및 한글 출력용)
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+
+# ==========================================
+# [핵심 수정] 한글 입력 깨짐 방지 함수
+# ==========================================
+def safe_input(prompt):
+    """
+    윈도우 도커 환경에서 input() 사용 시 발생하는 UnicodeDecodeError를 방지합니다.
+    데이터를 바이트(Raw Byte) 단위로 받아서 UTF-8 또는 CP949로 번역을 시도합니다.
+    """
+    print(prompt, end='', flush=True)
+    try:
+        # 1. 표준 입력 버퍼에서 날것의 데이터 읽기
+        line = sys.stdin.buffer.readline()
+        if not line: return ""  # EOF 처리
+
+        # 2. UTF-8로 먼저 디코딩 시도 (대부분의 리눅스/도커 환경)
+        try:
+            return line.decode('utf-8').strip()
+        except UnicodeDecodeError:
+            # 3. 실패 시 윈도우 기본 인코딩(CP949)으로 디코딩 시도
+            return line.decode('cp949').strip()
+    except Exception:
+        return ""
+
+
+# ==========================================
+# 설정 및 초기화
+# ==========================================
+
+# 1. 사용할 모델 이름
 LOCAL_MODEL_NAME = "exaone3.5"
 
 # 2. Ollama 주소 설정
@@ -18,12 +52,10 @@ print(f"🔗 AI 연결 주소: {OLLAMA_URL}")
 # Ollama 클라이언트 초기화
 client = OpenAI(
     base_url=OLLAMA_URL,
-    api_key="ollama"  # Ollama는 키가 필요 없지만 형식상 입력
+    api_key="ollama"
 )
 
-# ==========================================
-# 1. 장치 자동 설정
-# ==========================================
+# 3. 장치 자동 설정
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 print("-" * 30)
@@ -36,7 +68,7 @@ print("-" * 30)
 EMBEDDING_FILE = config.EMBEDDING_FILE
 TEXT_DATA_FILE = config.TEXT_DATA_FILE
 
-# 2. 모델 로드 (SBERT: 검색 담당)
+# 4. 모델 로드 (SBERT)
 model = SentenceTransformer('jhgan/ko-sbert-nli', device=device)
 
 if os.path.exists(EMBEDDING_FILE) and os.path.exists(TEXT_DATA_FILE):
@@ -44,15 +76,22 @@ if os.path.exists(EMBEDDING_FILE) and os.path.exists(TEXT_DATA_FILE):
     dataset_embeddings = torch.load(EMBEDDING_FILE, map_location=device)
     with open(TEXT_DATA_FILE, 'r', encoding='utf-8') as f:
         dataset = json.load(f)
-
 else:
     print("--- 데이터셋 생성 및 임베딩 시작 ---")
-    test_path = os.path.join("../Dataset", "Training")
+    # 경로가 ./Dataset 인지 ../Dataset 인지 환경에 맞게 확인 필요 (현재 ./Dataset으로 수정됨)
+    test_path = os.path.join("./Dataset", "Training")
+
+    # 폴더가 없을 경우 예외처리
+    if not os.path.exists(test_path):
+        # 만약 도커에서 경로가 다르다면 ../Dataset으로 시도
+        test_path = os.path.join("../Dataset", "Training")
+
     dataset = extract_speaker_text_from_json_in_folder(test_path)
 
     if not dataset:
-        print("오류: 데이터셋을 찾을 수 없습니다.")
+        print(f"오류: 데이터셋을 찾을 수 없습니다. 경로: {test_path}")
         exit()
+
     dataset_embeddings = model.encode(dataset, convert_to_tensor=True)
 
     torch.save(dataset_embeddings, EMBEDDING_FILE)
@@ -62,38 +101,38 @@ else:
 print(f"--- 데이터 준비 완료 (총 {len(dataset)}개) ---")
 print("-" * 30)
 
+# ==========================================
+# 메인 루프
+# ==========================================
 while True:
     try:
-        user_speech = input(" 💬 입력 (종료하려면 '종료'): ")
-    except EOFError:
+        # [수정] input() 대신 safe_input() 사용
+        user_speech = safe_input(" 💬 입력 (종료하려면 '종료'): ")
+    except KeyboardInterrupt:
+        print("\n프로그램을 종료합니다.")
         break
 
-    if user_speech.strip():
+    if user_speech:  # 내용이 있을 때만 실행
         if "종료" in user_speech.replace(" ", ""):
             print(" 프로그램 종료 ")
             break
 
-        user_speech = str(user_speech).strip()
-        # 1. [검색] 사용자의 질문과 가장 유사한 답변 찾기 (Retrieval)
+        # 1. [검색] (Retrieval)
         user_speech_embedding = model.encode(user_speech, convert_to_tensor=True)
         hits = util.semantic_search(user_speech_embedding, dataset_embeddings, top_k=1)
 
-        # 가장 유사한 1개만 가져옵니다.
         top_hit = hits[0][0]
         matched_text = dataset[top_hit['corpus_id']]
         similarity_score = top_hit['score']
 
-        # 답변 부분만 추출 (Context로 사용)
         if "답변:" in matched_text:
             reference_answer = matched_text.split("답변:", 1)[1].strip()
         else:
             reference_answer = matched_text
 
-        print(f"\[참고 자료 검색 완료] (유사도: {similarity_score:.4f})")
-        # 디버깅용으로 원본이 보고 싶으면 아래 주석 해제
-        # print(f"참고 내용: {reference_answer[:100]}...")
+        print(f"\n[참고 자료 검색 완료] (유사도: {similarity_score:.4f})")
 
-        # 2. [생성] Ollama에게 요약 및 답변 생성 요청 (Generation)
+        # 2. [생성] (Generation)
         print(f"{LOCAL_MODEL_NAME} 수의사가 답변을 생성 중입니다...")
 
         try:
@@ -114,7 +153,7 @@ while True:
                         "content": f"사용자 질문: {user_speech}\n\n[참고 정보]: {reference_answer}"
                     }
                 ],
-                temperature=0.7  # 창의성 조절
+                temperature=0.7
             )
             final_answer = completion.choices[0].message.content
 
@@ -123,10 +162,11 @@ while True:
 
         except Exception as e:
             print(f"\n Ollama 연결 실패: {e}")
-            print("\n[원본 답변]:")
+            print("\n[원본 답변 (Fallback)]:")
             print(reference_answer)
 
     else:
-        print("내용을 입력해주세요.")
+        # 엔터만 쳤을 때
+        pass
 
     print("=" * 30)

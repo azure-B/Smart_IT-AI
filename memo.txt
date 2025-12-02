@@ -4,14 +4,24 @@ ollama pull exaone3.5
 doker 생성
 docker build -t my-dog-bot .
 
+chcp 65001
+
 테스팅
 docker run -it --gpus all --name dog-bot -v ${PWD}:/app my-dog-bot
+docker run -it --name dog-bot -v ${PWD}:/app my-dog-bot
 
 서버 gpu
 docker run -d --gpus all -p 8000:8000 -v ${PWD}:/app --name dog-api my-dog-api
 
 ollama
 docker run -it --rm --gpus all `
+  -e OLLAMA_URL="http://host.docker.internal:11434/v1" `
+  -e PYTHONIOENCODING=utf-8 `
+  -e LANG=C.UTF-8 `
+  --add-host host.docker.internal:host-gateway `
+  -v ${PWD}:/app --name dog-bot my-dog-bot
+
+  docker run -it --rm `
   -e OLLAMA_URL="http://host.docker.internal:11434/v1" `
   -e PYTHONIOENCODING=utf-8 `
   -e LANG=C.UTF-8 `
